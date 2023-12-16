@@ -16,7 +16,7 @@ async fn main() {
     let passcode = &args[2];
     let address = &args[3];
     let video_device = &args[4];
-    let mut client = Client::new(username, passcode, address);
+    let mut client = Client::new(username, passcode, address).await;
     let mut motion_detector = MotionDetector::new(video_device);
 
     // start detectino loop

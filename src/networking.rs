@@ -2,23 +2,33 @@ use std::collections::HashMap;
 use std::error::Error;
 use reqwest::redirect::Policy;
 use reqwest::Url;
+use security_cam_common::encryption::*;
+use security_cam_common::shuttle_runtime::tokio::fs::File;
 
 pub struct Client<'a> {
     addr: Url,
     username: &'a str,
     password: &'a str,
     client: reqwest::Client,
+    encryptor: EncryptDecrypt,
 }
 
 impl<'a> Client<'a> {
-    pub fn new(addr: &'a str, username: &'a str, password: &'a str) -> Self {
+    pub async fn new(addr: &'a str, username: &'a str, password: &'a str) -> Client<'a> {
         // doesnt need to be a recoverable error because if it fails then we want our whole program to exit anyways
         let client_with_cookies = reqwest::Client::builder().redirect(Policy::limited(2)).cookie_store(true).build().expect("couldn't build http client");
+        let (key, salt) = generate_key(password).expect("couldnt generate keystream");
+        let encryptor = EncryptDecrypt {
+            key: Some(key),
+            salt: Some(salt),
+            file: File::create("first.mp4").await.expect("couldn't create first mp4 file")
+        };
         Client {
             addr: Url::parse(addr).expect("invalid url"),
             username,
             password,
             client:  client_with_cookies,
+            encryptor
         }
     }
 
@@ -57,13 +67,13 @@ mod tests {
     /// only run this test while the server is active
     #[tokio::test]
     async fn test_login() {
-        let client = super::Client::new("http://127.0.0.1:8000", "admin", "pass");
+        let client = super::Client::new("http://127.0.0.1:8000", "admin", "pass").await;
         client.login().await.unwrap();
     }
 
     #[tokio::test]
     async fn test_bad_login() {
-        let client = super::Client::new("http://127.0.0.1:8000", "admin", "badpass");
+        let client = super::Client::new("http://127.0.0.1:8000", "admin", "badpass").await;
         client.login().await.unwrap_err();
     }
 }
