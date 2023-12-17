@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use image::{GenericImage, GenericImageView, GrayImage, ImageBuffer, ImageFormat, Luma, Pixel, Rgb, Rgba};
 use imageproc::contrast::threshold;
 use imageproc::utils::{Diff};
@@ -72,6 +72,9 @@ impl MotionDetector {
             let mut frame1:Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
             let mut frame2: Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
             let mut frame3: Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
+            let mut last_movement: Option<Instant> = None;
+            let mut framecounter = 0;
+            let mut videocounter = 0;
             loop {
 
                 let buffer = match threaded.poll_frame() {
@@ -109,7 +112,25 @@ impl MotionDetector {
                             // Combine the differences with a logical AND
                             let score = movement_score(&thresholded_diff1, &thresholded_diff2);
 
+                            if let Some(time) = last_movement {
+                                let time = time.elapsed().as_secs();
+                                if time < 10 {
+                                    let mut filename = "video_frames/".to_string();
+                                    filename.push_str(&videocounter.to_string());
+                                    filename.push_str(".");
+                                    filename.push_str(&framecounter.to_string());
+                                    filename.push_str(".jpg");
+                                    buffer.decode_image::<RgbFormat>().unwrap().save(filename).unwrap();
+                                    framecounter += 1;
+                                } else {
+                                    tx.send(FileCommand::FileName(videocounter.to_string()));
+                                    last_movement = None;
+                                    videocounter +=1;
+                                }
+                            }
+
                             if score > 5 {
+                                last_movement = Some(Instant::now());
                                 println!("movement detected");
                             }
                             // Now 'result' contains the detected object without its ghost
