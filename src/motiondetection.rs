@@ -13,10 +13,17 @@ use nokhwa::pixel_format::{LumaFormat, RgbAFormat, RgbFormat};
 use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};
 
 const THRESHOLD_VALUE: i32 = 60;
+
+/// Error contains any error message thrown during the frame reading loop
+/// Frame range indicates that there are new frames in /video_frames
+/// frames in video_frames have the format {video num}.{frame_num}.jpg
+/// if two files have the same video num, then they should be in the same video.
+/// frame num is the frame number in the video, where the second number in FrameRange is the last
+/// frame number.
 #[derive(Clone,Debug)]
 pub enum FileCommand {
     Error(String),
-    FileName(String)
+    FrameRange(usize,u64)
 }
 
 
@@ -64,19 +71,21 @@ impl MotionDetector {
 
         // how often to take a snapshot to compare future frames with
         let tx = self.tx.clone();
+        let mut threaded = CallbackCamera::new(index, requested, |buffer| {
+        }).unwrap();
+        threaded.open_stream().unwrap();
+        let mut frame1:Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
+        let mut frame2: Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
+        let mut frame3: Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
+        let mut last_movement: Option<Instant> = None;
+        let mut framecounter = 0;
+        let mut videocounter = 0;
 
         self.motion_detection_thread = Some(thread::spawn( move || {
-            let mut threaded = CallbackCamera::new(index, requested, |buffer| {
-            }).unwrap();
-            threaded.open_stream().unwrap();
-            let mut frame1:Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
-            let mut frame2: Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
-            let mut frame3: Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
-            let mut last_movement: Option<Instant> = None;
-            let mut framecounter = 0;
-            let mut videocounter = 0;
+            // ----------------------------------------------------------------
+            // -------------------FRAME PROCESSING LOOP -----------------------
+            // ----------------------------------------------------------------
             loop {
-
                 let buffer = match threaded.poll_frame() {
                     Ok(buf) => {
                         buf
@@ -120,20 +129,21 @@ impl MotionDetector {
                                     filename.push_str(".");
                                     filename.push_str(&framecounter.to_string());
                                     filename.push_str(".jpg");
-                                    buffer.decode_image::<RgbFormat>().unwrap().save(filename).unwrap();
+                                    if let Err(e) = buffer.decode_image::<RgbFormat>().unwrap().save(filename) {
+                                        tx.send(FileCommand::Error(e.to_string()));
+                                    }
                                     framecounter += 1;
                                 } else {
-                                    tx.send(FileCommand::FileName(videocounter.to_string()));
+                                    tx.send(FileCommand::FrameRange(videocounter,framecounter));
                                     last_movement = None;
                                     videocounter +=1;
+                                    framecounter = 0;
                                 }
                             }
 
                             if score > 5 {
                                 last_movement = Some(Instant::now());
-                                println!("movement detected");
                             }
-                            // Now 'result' contains the detected object without its ghost
                         }
                     }
                     Err(e) => {

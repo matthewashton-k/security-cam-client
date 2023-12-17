@@ -3,6 +3,7 @@
 use security_cam_client::motiondetection::{FileCommand, MotionDetector};
 use security_cam_client::networking::Client;
 use security_cam_common::shuttle_runtime::tokio;
+use security_cam_client::ffmpeg::execute_ffmpeg;
 
 #[tokio::main]
 async fn main() {
@@ -14,9 +15,11 @@ async fn main() {
     }
     let username = &args[1];
     let passcode = &args[2];
-    let address = &args[3];
+    let address = &args[3].trim();
     let video_device: &u32 = &args[4].parse().expect("video device must be an integer");
-    let mut client = Client::new(username, passcode, address).await;
+    println!("{address}");
+    let mut client = Client::new(address, username, passcode).await;
+    client.login().await.expect("failed to login");
     let mut motion_detector = MotionDetector::new(*video_device);
 
     // start detectino loop
@@ -26,10 +29,17 @@ async fn main() {
              FileCommand::Error(e) => {
                  println!("[ERROR] error in camera capture stream: {}", e);
              }
-             FileCommand::FileName(filename) => {
-                 match client.send_and_delete(filename).await {
-                     Ok(_) => println!("Successfully sent file"),
-                     Err(e) => println!("Error sending file: {}", e),
+             FileCommand::FrameRange(video_num,last_frame_num) => {
+                 match execute_ffmpeg(video_num,last_frame_num) {
+                     Ok(filename) => {
+                         match client.send_and_delete(filename).await {
+                              Ok(_) => println!("Successfully sent file"),
+                              Err(e) => println!("Error sending file: {}", e),
+                         }
+                     }
+                     Err(e) => {
+                         println!("[ERROR] {}",e.to_string());
+                     }
                  }
              }
          }
