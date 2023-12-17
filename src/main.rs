@@ -1,6 +1,6 @@
 // TODO
 
-use security_cam_client::motiondetection::MotionDetector;
+use security_cam_client::motiondetection::{FileCommand, MotionDetector};
 use security_cam_client::networking::Client;
 use security_cam_common::shuttle_runtime::tokio;
 
@@ -15,17 +15,25 @@ async fn main() {
     let username = &args[1];
     let passcode = &args[2];
     let address = &args[3];
-    let video_device = &args[4];
+    let video_device: &u32 = &args[4].parse().expect("video device must be an integer");
     let mut client = Client::new(username, passcode, address).await;
-    let mut motion_detector = MotionDetector::new(video_device);
+    let mut motion_detector = MotionDetector::new(*video_device);
 
     // start detectino loop
     motion_detector.start_detection().expect("failed to start detection");
-    while let Some(filename) = motion_detector.try_ask_for_filename().await {
-        match client.send_and_delete(filename).await {
-            Ok(_) => println!("Successfully sent file"),
-            Err(e) => println!("Error sending file: {}", e),
-        }
+    while let Some(command) = motion_detector.ask_for_filename() {
+         match command {
+             FileCommand::Error(e) => {
+                 println!("[ERROR] error in camera capture stream: {}", e);
+             }
+             FileCommand::FileName(filename) => {
+                 match client.send_and_delete(filename).await {
+                     Ok(_) => println!("Successfully sent file"),
+                     Err(e) => println!("Error sending file: {}", e),
+                 }
+             }
+         }
+
     }
 }
 
@@ -33,9 +41,17 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use security_cam_common::shuttle_runtime::tokio;
+    use security_cam_client::motiondetection::MotionDetector;
 
     #[tokio::test]
     async fn test_reqwest() {
         reqwest::get("https://httpbin.org/ip").await.unwrap().bytes().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_img_capture() {
+        let mut motion_detector = MotionDetector::new(0);
+        motion_detector.start_detection().unwrap();
+        motion_detector.motion_detection_thread.unwrap().join();
     }
 }
