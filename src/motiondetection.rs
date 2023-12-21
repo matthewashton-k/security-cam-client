@@ -14,6 +14,7 @@ use v4l::prelude::{UserptrStream};
 use v4l::video::Capture;
 use v4l::Device;
 use v4l::FourCC;
+
 const THRESHOLD_VALUE: i32 = 60;
 
 /// Error contains any error message thrown during the frame reading loop
@@ -98,7 +99,12 @@ impl MotionDetector {
             // -------------------FRAME PROCESSING LOOP -----------------------
             // ----------------------------------------------------------------
             loop {
-                let (buf, meta) = stream.next().expect("failed to get next frame");
+                let buf = if let Ok((buf, _)) = stream.next() {
+                    buf
+                } else {
+                    tx.send(FileCommand::Error("failed to capture frame".to_string()));
+                    continue;
+                };
                 match decode(buf) {
                     Ok(frame_dynamic) => {
                         let frame = frame_dynamic.to_luma8();
