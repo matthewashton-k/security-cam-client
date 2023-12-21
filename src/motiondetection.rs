@@ -1,17 +1,19 @@
 use std::error::Error;
-use std::slice::Chunks;
-use std::sync::Arc;
+
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
-use image::{GenericImage, GenericImageView, GrayImage, ImageBuffer, ImageFormat, Luma, Pixel, Rgb, Rgba};
+use image::{DynamicImage, GenericImage, GenericImageView, GrayImage, ImageBuffer, Luma, Pixel};
+use image::codecs::jpeg::JpegDecoder;
 use imageproc::contrast::threshold;
 use imageproc::utils::{Diff};
-use nokhwa::{Buffer, CallbackCamera, Camera, NokhwaError};
-use nokhwa::pixel_format::{LumaFormat, RgbAFormat, RgbFormat};
-use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};
-
+use v4l::buffer::Type;
+use v4l::io::traits::CaptureStream;
+use v4l::prelude::{UserptrStream};
+use v4l::video::Capture;
+use v4l::Device;
+use v4l::FourCC;
 const THRESHOLD_VALUE: i32 = 60;
 
 /// Error contains any error message thrown during the frame reading loop
@@ -23,7 +25,8 @@ const THRESHOLD_VALUE: i32 = 60;
 #[derive(Clone,Debug)]
 pub enum FileCommand {
     Error(String),
-    FrameRange(usize,u64)
+    /// video_num, frame_num, frame_rate
+    FrameRange(usize,u64,usize)
 }
 
 
@@ -61,43 +64,44 @@ impl MotionDetector {
         self.rx.recv().ok()
     }
 
-    pub  fn start_detection(&mut self) -> Result<(), Box<dyn Error>> {
+    pub fn start_detection(&mut self) -> Result<(), Box<dyn Error>> {
         if self.motion_detection_thread.is_some() {
             return Err("already started".into());
         }
-        let index = CameraIndex::Index(self.video_device);
-        // request the absolute highest resolution CameraFormat that can be decoded to RGB.
-        let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+        let mut device = Device::new(self.video_device as usize)?;
+        let mut format = device.format()?;
+        format.fourcc = FourCC::new(b"MJPG");
+        format = device.set_format(&format)?;
+        println!("{:?}", format);
+        let params = device.params()?;
+        let mut stream = UserptrStream::new(&device,Type::VideoCapture)?;
 
-        // how often to take a snapshot to compare future frames with
+
+        // send FileCommands through tx to interact with the main thread
         let tx = self.tx.clone();
-        let mut threaded = CallbackCamera::new(index, requested, |buffer| {
-        }).unwrap();
-        threaded.open_stream().unwrap();
+
+        // the diffs of f1 and f2, and f2 and f3 are used to see if motion is detece
         let mut frame1:Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
         let mut frame2: Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
         let mut frame3: Option<ImageBuffer<Luma<u8>, Vec<u8>>> = None;
+
+        // time since movement was last detected, or None if movement hasnt been detected for 10 seconds
         let mut last_movement: Option<Instant> = None;
         let mut framecounter = 0;
         let mut videocounter = 0;
 
+        let mut framerate_time = Instant::now();
+        let mut framerate_counter = 0;
+        let mut fps= 25;
         self.motion_detection_thread = Some(thread::spawn( move || {
             // ----------------------------------------------------------------
             // -------------------FRAME PROCESSING LOOP -----------------------
             // ----------------------------------------------------------------
             loop {
-                let buffer = match threaded.poll_frame() {
-                    Ok(buf) => {
-                        buf
-                    }
-                    Err(e) => {
-                        println!("there was an error");
-                        tx.send(FileCommand::Error(e.to_string()));
-                        continue;
-                    }
-                };
-                match buffer.decode_image::<LumaFormat>() {
-                    Ok(frame) => {
+                let (buf, meta) = stream.next().expect("failed to get next frame");
+                match decode(buf) {
+                    Ok(frame_dynamic) => {
+                        let frame = frame_dynamic.to_luma8();
                         // Shift the frames
                         frame1 = frame2;
                         frame2 = frame3;
@@ -124,17 +128,13 @@ impl MotionDetector {
                             if let Some(time) = last_movement {
                                 let time = time.elapsed().as_secs();
                                 if time < 10 {
-                                    let mut filename = "video_frames/".to_string();
-                                    filename.push_str(&videocounter.to_string());
-                                    filename.push_str(".");
-                                    filename.push_str(&framecounter.to_string());
-                                    filename.push_str(".jpg");
-                                    if let Err(e) = buffer.decode_image::<RgbFormat>().unwrap().save(filename) {
+                                    let filename = gen_filename(&mut framecounter, &mut videocounter);
+                                    if let Err(e) = frame_dynamic.save(filename) {
                                         tx.send(FileCommand::Error(e.to_string()));
                                     }
                                     framecounter += 1;
                                 } else {
-                                    tx.send(FileCommand::FrameRange(videocounter,framecounter));
+                                    tx.send(FileCommand::FrameRange(videocounter,framecounter,fps));
                                     last_movement = None;
                                     videocounter +=1;
                                     framecounter = 0;
@@ -142,6 +142,7 @@ impl MotionDetector {
                             }
 
                             if score > 5 {
+                                println!("movement detected");
                                 last_movement = Some(Instant::now());
                             }
                         }
@@ -150,11 +151,21 @@ impl MotionDetector {
                         tx.send(FileCommand::Error(e.to_string()));
                     }
                 }
+
+
+                framerate_counter +=1;
+                // Calculate frame rate every second
+                if framerate_time.elapsed().as_secs() >= 1 {
+                    fps = framerate_counter;
+                    println!("FPS: {}", fps);
+                    // Reset counter and timer
+                    framerate_counter = 0;
+                    framerate_time = Instant::now();
+                }
             }
         }));
         Ok(())
     }
-
 }
 
 pub fn pixel_diffs<I, J, F, P>(actual: &I, expected: &J, is_diff: F) -> Vec<Diff<I::Pixel>>
@@ -188,7 +199,15 @@ pub fn pixel_diffs<I, J, F, P>(actual: &I, expected: &J, is_diff: F) -> Vec<Diff
     diffs
 }
 
-
+/// helper method for making a filename from a frame counter and a video counter
+fn gen_filename(framecounter: &u64, videocounter: &usize) -> String {
+    let mut filename = "video_frames/".to_string();
+    filename.push_str(&videocounter.to_string());
+    filename.push_str(".");
+    filename.push_str(&framecounter.to_string());
+    filename.push_str(".jpg");
+    filename
+}
 
 fn diffs_to_gray_image(diffs: Vec<Diff<Luma<u8>>>, width: u32, height: u32) -> GrayImage {
     // Convert each Diff<Rgb<u8>> to a grayscale pixel
@@ -200,6 +219,12 @@ fn diffs_to_gray_image(diffs: Vec<Diff<Luma<u8>>>, width: u32, height: u32) -> G
     }
 
     grey_image
+}
+
+/// decodes a buffer into a dynamicimage
+fn decode(jpg: &[u8]) -> Result<DynamicImage, Box<dyn Error>> {
+    let decoder = JpegDecoder::new(jpg)?;
+    Ok(DynamicImage::from_decoder(decoder)?)
 }
 
 fn movement_score(image1: &GrayImage, image2: &GrayImage) -> u32 {

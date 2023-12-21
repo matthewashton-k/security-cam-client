@@ -1,5 +1,7 @@
 // TODO
 
+use std::fs::{create_dir, DirEntry};
+use std::path::Path;
 use security_cam_client::motiondetection::{FileCommand, MotionDetector};
 use security_cam_client::networking::Client;
 use security_cam_common::shuttle_runtime::tokio;
@@ -8,6 +10,7 @@ use security_cam_client::ffmpeg::execute_ffmpeg;
 #[tokio::main]
 async fn main() {
     // username, passcode, and address should be read in from the command line and then a new Client can be constructed from them
+    set_up_dirs().expect("couldnt create video_frames directory");
     let args = std::env::args().collect::<Vec<_>>();
     if  args.len() != 5 {
         println!("Usage: client <username> <passcode> <address> <video device>");
@@ -29,8 +32,8 @@ async fn main() {
              FileCommand::Error(e) => {
                  println!("[ERROR] error in camera capture stream: {}", e);
              }
-             FileCommand::FrameRange(video_num,last_frame_num) => {
-                 match execute_ffmpeg(video_num,last_frame_num) {
+             FileCommand::FrameRange(video_num,last_frame_num,fps) => {
+                 match execute_ffmpeg(video_num, last_frame_num, fps) {
                      Ok(filename) => {
                          match client.send_and_delete(filename).await {
                               Ok(_) => println!("Successfully sent file"),
@@ -45,6 +48,15 @@ async fn main() {
          }
 
     }
+}
+
+fn set_up_dirs() -> Result<(), std::io::Error> {
+    if Path::new("video_frames").exists() {
+        return Ok(());
+    } else {
+        create_dir("video_frames")?;
+    }
+    Ok(())
 }
 
 

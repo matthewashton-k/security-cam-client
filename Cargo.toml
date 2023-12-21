@@ -9,15 +9,7 @@ edition = "2021"
 reqwest = {version = "0.11.22", features = ["cookies","stream"]}
 imageproc = "0.23.0"
 security-cam-common = {version = "0.1.3"}
-
-# this commit works because it fixed a deadlock problem...
-# I really should switch to useing opencv or just rewrite the client code in cpp
-[dependencies.nokhwa]
-git = "https://github.com/l1npengtul/nokhwa.git"
-rev ="668b7faa103e929954b4a000961ffd828dafa14e"
-# Use the native input backends
-features = ["input-native","output-threaded"]
-
+v4l = "0.14.0"
 [dependencies.image]
 version = "0.24.1"
 default-features = true

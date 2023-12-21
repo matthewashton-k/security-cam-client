@@ -4,3 +4,4 @@
 *.png
 *.mp4
 /video_frames/*.jpg
+/video_frames/*

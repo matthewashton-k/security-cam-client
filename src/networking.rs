@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::error::Error;
-use nokhwa::query;
 use reqwest::redirect::Policy;
 use reqwest::{Body, Url};
 use security_cam_common::encryption::*;
+use security_cam_common::shuttle_runtime::tokio::fs;
 use security_cam_common::shuttle_runtime::tokio::fs::File;
 
 pub struct Client<'a> {
@@ -55,11 +55,12 @@ impl<'a> Client<'a> {
         let encryptor = EncryptDecrypt {
             key: Some(key),
             salt: Some(salt),
-            file: File::options().read(true).write(true).open(filename).await?
+            file: File::options().read(true).write(true).open(&filename).await?
         };
         let stream = Box::pin(encryptor.encrypt_stream());
         let resp = self.client.post(self.addr.join("new_video")?.as_str()).body(Body::wrap_stream(stream)).send().await?;
         println!("status: {:?}, text: {:?}",resp.status(), resp.text().await, );
+        fs::remove_file(&filename).await?;
         Ok(())
     }
 }
