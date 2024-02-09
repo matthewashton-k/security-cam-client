@@ -51,13 +51,8 @@ impl<'a> Client<'a> {
     pub async fn send_and_delete(&self, filename: String) -> Result<(), Box<dyn Error>> {
         let (key, salt) = generate_key(self.password).expect("couldnt generate keystream");
 
-        // creating a new encryptor each time we need to send a file is less than optimal, but it will have to do until I change the common api
-        let encryptor = EncryptDecrypt {
-            key: Some(key),
-            salt: Some(salt),
-            file: File::options().read(true).write(true).open(&filename).await?
-        };
-        let stream = Box::pin(encryptor.encrypt_stream());
+        let file = File::options().read(true).write(true).open(&filename).await?;
+        let stream = Box::pin(encrypt_stream(key,salt,file));
         let resp = self.client.post(self.addr.join("new_video")?.as_str()).body(Body::wrap_stream(stream)).send().await?;
         println!("status: {:?}, text: {:?}",resp.status(), resp.text().await, );
         fs::remove_file(&filename).await?;
