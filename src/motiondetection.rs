@@ -14,6 +14,7 @@ use v4l::prelude::{UserptrStream};
 use v4l::video::Capture;
 use v4l::Device;
 use v4l::FourCC;
+use v4l::io::userptr::Stream;
 
 const THRESHOLD_VALUE: i32 = 60;
 
@@ -95,82 +96,97 @@ impl MotionDetector {
         let mut framerate_counter = 0;
         let mut fps= 25;
         self.motion_detection_thread = Some(thread::spawn( move || {
-            // ----------------------------------------------------------------
-            // -------------------FRAME PROCESSING LOOP -----------------------
-            // ----------------------------------------------------------------
-            loop {
-                let buf = if let Ok((buf, _)) = stream.next() {
-                    buf
-                } else {
-                    tx.send(FileCommand::Error("failed to capture frame".to_string()));
-                    continue;
-                };
-                match decode(buf) {
-                    Ok(frame_dynamic) => {
-                        let frame = frame_dynamic.to_luma8();
-                        // Shift the frames
-                        frame1 = frame2;
-                        frame2 = frame3;
-                        frame3 = Some(frame);
-                        if let (Some(f1), Some(f2), Some(f3)) = (&frame1, &frame2, &frame3) {
-                            // Calculate the difference between f2 and f1, and between f3 and f2
-                            let diff1 = pixel_diffs(f2, f1, |(x1, y1, p1), (x2, y2, p2)| {
-                                (p1[0].abs_diff(p2[0])) > 30
-                            });
-
-                            let diff2 = pixel_diffs(f3, f2, |(x1, y1, p1), (x2, y2, p2)| {
-                                (p1[0].abs_diff(p2[0])) > 30
-                            });
-
-                            let diff1= diffs_to_gray_image(diff1, f3.width(),f3.height());
-                            let diff2 = diffs_to_gray_image(diff2, f3.width(),f3.height());
-                            // Threshold the differences
-                            let thresholded_diff1 = threshold(&diff1, THRESHOLD_VALUE as u8);
-                            let thresholded_diff2 = threshold(&diff2, THRESHOLD_VALUE as u8);
-
-                            // Combine the differences with a logical AND
-                            let score = movement_score(&thresholded_diff1, &thresholded_diff2);
-
-                            if let Some(time) = last_movement {
-                                let time = time.elapsed().as_secs();
-                                if time < 10 {
-                                    let filename = gen_filename(&mut framecounter, &mut videocounter);
-                                    if let Err(e) = frame_dynamic.save(filename) {
-                                        tx.send(FileCommand::Error(e.to_string()));
-                                    }
-                                    framecounter += 1;
-                                } else {
-                                    tx.send(FileCommand::FrameRange(videocounter,framecounter,fps));
-                                    last_movement = None;
-                                    videocounter +=1;
-                                    framecounter = 0;
-                                }
-                            }
-
-                            if score > 5 {
-                                println!("movement detected");
-                                last_movement = Some(Instant::now());
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tx.send(FileCommand::Error(e.to_string()));
-                    }
-                }
-
-
-                framerate_counter +=1;
-                // Calculate frame rate every second
-                if framerate_time.elapsed().as_secs() >= 1 {
-                    fps = framerate_counter;
-                    println!("FPS: {}", fps);
-                    // Reset counter and timer
-                    framerate_counter = 0;
-                    framerate_time = Instant::now();
-                }
-            }
+            Self::frame_loop(stream, tx, frame1, frame2, frame3, last_movement,  framecounter, videocounter, framerate_time, framerate_counter, fps);
         }));
         Ok(())
+    }
+
+    fn frame_loop(mut stream: Stream,
+                  tx: Sender<FileCommand>,
+                  mut frame1: Option<ImageBuffer<Luma<u8>, Vec<u8>>>,
+                  mut frame2: Option<ImageBuffer<Luma<u8>, Vec<u8>>>,
+                  mut frame3: Option<ImageBuffer<Luma<u8>, Vec<u8>>>,
+                  mut last_movement: Option<Instant>,
+                  mut framecounter: u64,
+                  mut videocounter: usize,
+                  mut framerate_time: Instant,
+                  mut framerate_counter: usize,
+                  mut fps: usize)
+    {
+        // ----------------------------------------------------------------
+        // -------------------FRAME PROCESSING LOOP -----------------------
+        // ----------------------------------------------------------------
+        loop {
+            let buf = if let Ok((buf, _)) = stream.next() {
+                buf
+            } else {
+                tx.send(FileCommand::Error("failed to capture frame".to_string()));
+                continue;
+            };
+            match decode(buf) {
+                Ok(frame_dynamic) => {
+                    let frame = frame_dynamic.to_luma8();
+                    // Shift the frames
+                    frame1 = frame2;
+                    frame2 = frame3;
+                    frame3 = Some(frame);
+                    if let (Some(f1), Some(f2), Some(f3)) = (&frame1, &frame2, &frame3) {
+                        // Calculate the difference between f2 and f1, and between f3 and f2
+                        let diff1 = pixel_diffs(f2, f1, |(x1, y1, p1), (x2, y2, p2)| {
+                            (p1[0].abs_diff(p2[0])) > 30
+                        });
+
+                        let diff2 = pixel_diffs(f3, f2, |(x1, y1, p1), (x2, y2, p2)| {
+                            (p1[0].abs_diff(p2[0])) > 30
+                        });
+
+                        let diff1 = diffs_to_gray_image(diff1, f3.width(), f3.height());
+                        let diff2 = diffs_to_gray_image(diff2, f3.width(), f3.height());
+                        // Threshold the differences
+                        let thresholded_diff1 = threshold(&diff1, THRESHOLD_VALUE as u8);
+                        let thresholded_diff2 = threshold(&diff2, THRESHOLD_VALUE as u8);
+
+                        // Combine the differences with a logical AND
+                        let score = movement_score(&thresholded_diff1, &thresholded_diff2);
+
+                        if let Some(time) = last_movement {
+                            let time = time.elapsed().as_secs();
+                            if time < 10 {
+                                let filename = gen_filename(&mut framecounter, &mut videocounter);
+                                if let Err(e) = frame_dynamic.save(filename) {
+                                    tx.send(FileCommand::Error(e.to_string()));
+                                }
+                                framecounter += 1;
+                            } else {
+                                tx.send(FileCommand::FrameRange(videocounter, framecounter, fps));
+                                last_movement = None;
+                                videocounter += 1;
+                                framecounter = 0;
+                            }
+                        }
+
+                        if score > 5 {
+                            println!("movement detected");
+                            last_movement = Some(Instant::now());
+                        }
+                    }
+                }
+                Err(e) => {
+                    tx.send(FileCommand::Error(e.to_string()));
+                }
+            }
+
+
+            framerate_counter += 1;
+            // Calculate frame rate every second
+            if framerate_time.elapsed().as_secs() >= 1 {
+                fps = framerate_counter;
+                println!("FPS: {}", fps);
+                // Reset counter and timer
+                framerate_counter = 0;
+                framerate_time = Instant::now();
+            }
+        }
     }
 }
 
