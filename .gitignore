@@ -1,6 +1,7 @@
 /target
 .idea
 *.jpeg
+*.jpg
 *.png
 *.mp4
 /video_frames
