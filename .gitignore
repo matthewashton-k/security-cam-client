@@ -1,5 +1,11 @@
 /target
 .idea
 *.jpeg
+*.jpg
 *.png
 *.mp4
+*.txt
+*.out
+*.bytes
+*.unencrypted
+/video_frames
