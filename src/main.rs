@@ -61,13 +61,20 @@ async fn main() {
                     }
                 }
                 if is_last_frame {
-                    println!("GOT LAST FRAME, closing websocket");
-                    client.tx = None;
-                    if let Some(task) = client.transfer_task.take() {
-                        task.await.unwrap();
+                    println!("Processing last frame");
+                    if let Some(tx) = client.tx.take() {
+                        drop(tx);
                     }
-                    client.transfer_task = None;
-                    println!("closed transfer task");
+                    if let Some(task) = client.transfer_task.take() {
+                        // Give the task time to complete
+                        match tokio::time::timeout(std::time::Duration::from_secs(10), task).await {
+                            Ok(Ok(_)) => println!("Transfer task completed successfully"),
+                            Ok(Err(e)) => eprintln!("Transfer task failed: {:?}", e),
+                            Err(_) => eprintln!("Transfer task timed out"),
+                        }
+                    }
+
+                    println!("Cleanup completed");
                 }
             }
         }

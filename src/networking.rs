@@ -9,15 +9,16 @@ use reqwest_websocket::{RequestBuilderExt, UpgradedRequestBuilder, WebSocket};
 use security_cam_common::encryption::FrameReader;
 use security_cam_common::encryption::*;
 use security_cam_common::futures::{Sink, SinkExt, StreamExt, TryStreamExt};
-use security_cam_common::shuttle_runtime::tokio::fs;
 use security_cam_common::shuttle_runtime::tokio::fs::File;
-use security_cam_common::shuttle_runtime::tokio::sync::mpsc::{channel, Sender};
+use security_cam_common::shuttle_runtime::tokio::sync::mpsc::{channel, Receiver, Sender};
+use security_cam_common::shuttle_runtime::tokio::{self, fs};
 use security_cam_common::tokio_stream::wrappers::ReceiverStream;
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::ErrorKind::NotFound;
 use std::io::{Cursor, Read};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::motiondetection::Frame;
@@ -27,7 +28,8 @@ pub struct Client<'a> {
     password: &'a str,
     client: reqwest::Client,
     pub tx: Option<Sender<Result<Bytes, std::io::Error>>>,
-    pub transfer_task: Option<JoinHandle<()>>,
+    pub frame_stream: Option<Pin<Box<ReceiverStream<Result<Bytes, std::io::Error>>>>>,
+    pub transfer_task: Option<JoinHandle<Result<(), Box<dyn std::error::Error>>>>,
     // client_awc: awc::Client,
     // websocket_connection_awc: Option<Box<dyn Sink<Message, Error = WsProtocolError> + Unpin>>,
     // websocket_connection: Option<reqwest_websocket::WebSocket>,
@@ -60,6 +62,7 @@ impl<'a> Client<'a> {
             password,
             client: client_with_cookies,
             tx: None,
+            frame_stream: None,
             transfer_task: None,
             // client_awc,
             // websocket_connection_awc: None,
@@ -195,32 +198,34 @@ impl<'a> Client<'a> {
         // if not, then send frame on tx channel
         if self.tx.is_none() {
             println!("Starting new transfer");
-            let (tx, rx) = channel(50);
-            let tx_clone = tx.clone();
-            self.tx = Some(tx);
-            let tx = tx_clone;
-            let unencrypted_frame_stream = Box::pin(ReceiverStream::new(rx));
+            let (tx, rx) = channel(5);
+            self.tx = Some(tx.clone());
             let frame_len = frame.frame_bytes.len();
             tx.send(Ok(Bytes::from(frame.frame_bytes)))
                 .await
                 .expect("failed to send the frame butes to the receiver stream");
-            let framereader = FrameReader::new(unencrypted_frame_stream);
-            let (key, salt) = generate_key(self.password).expect("couldnt generate keystream");
-            let encrypted_frame_stream =
-                Box::pin(encrypt_frame_reader(key, salt, framereader, frame_len));
-            let url = self
-                .addr
-                .join("upload/")?
-                .join(&frame.video_num.to_string().to_path())?
-                .join(&frame.fps.to_string().to_path())?
-                .join(frame_len.to_string().as_ref())?;
-            println!("the url: {}", url.to_string());
-            let client = self.client.clone();
 
             // start the transfer task
-
+            let client = self.client.clone();
+            let password = self.password.to_string();
+            let addr = self.addr.clone();
             let transfer_task = actix_web::rt::spawn(async move {
+                let framereader = FrameReader::new(ReceiverStream::new(rx));
+                let (key, salt) = generate_key(&password).expect("couldnt generate keystream");
+                let encrypted_frame_stream = {
+                    let stream = encrypt_frame_reader(key, salt, framereader, frame_len);
+                    println!("Stream created");
+                    Box::pin(stream)
+                };
+                println!("Stream pinned");
+                let url = addr
+                    .join("upload/")?
+                    .join(&frame.video_num.to_string().to_path())?
+                    .join(&frame.fps.to_string().to_path())?
+                    .join(frame_len.to_string().as_ref())?;
+                println!("the url: {}", url.to_string());
                 if let Err(e) = async {
+                    println!("[*] opening connection");
                     let result = client
                         .post(url)
                         .body(Body::wrap_stream(encrypted_frame_stream))
@@ -233,6 +238,7 @@ impl<'a> Client<'a> {
                 {
                     eprintln!("[ERROR] Spawned task failed: {}", e);
                 }
+                Ok::<(), Box<dyn std::error::Error>>(())
             });
             self.transfer_task = Some(transfer_task);
         } else {
@@ -243,7 +249,10 @@ impl<'a> Client<'a> {
                 .send(Ok(Bytes::from(frame.frame_bytes)))
                 .await;
             if result.is_err() {
-                eprintln!("[ERROR]: {}", result.err().unwrap().to_string())
+                eprintln!(
+                    "[ERROR] sending over tx: {}",
+                    result.err().unwrap().to_string()
+                );
             }
         }
 

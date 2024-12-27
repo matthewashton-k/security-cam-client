@@ -154,7 +154,7 @@ impl MotionDetector {
                             let score = movement_score(&thresholded_diff1, &thresholded_diff2);
                             if let Some(time) = last_movement {
                                 let time = time.elapsed().as_secs();
-                                if time < 10 {
+                                if time < 3 {
                                     // if movement is still going on
                                     let filename =
                                         gen_filename(&mut framecounter, &mut videocounter);
