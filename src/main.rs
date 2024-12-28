@@ -57,6 +57,11 @@ async fn main() {
                         println!("sent frame");
                     }
                     Err(e) => {
+                        client.tx = None;
+                        if let Some(task) = client.transfer_task {
+                            task.abort();
+                        }
+                        client.transfer_task = None;
                         eprintln!("[ERROR]: {e:?}"); // Propagate the error
                     }
                 }

@@ -11,11 +11,12 @@ use security_cam_common::encryption::*;
 use security_cam_common::futures::{Sink, SinkExt, StreamExt, TryStreamExt};
 use security_cam_common::shuttle_runtime::tokio::fs::File;
 use security_cam_common::shuttle_runtime::tokio::sync::mpsc::{channel, Receiver, Sender};
+use security_cam_common::shuttle_runtime::tokio::sync::{Barrier, Notify};
 use security_cam_common::shuttle_runtime::tokio::{self, fs};
 use security_cam_common::tokio_stream::wrappers::ReceiverStream;
 use std::collections::HashMap;
 use std::error::Error;
-use std::io::ErrorKind::NotFound;
+use std::io::ErrorKind::{self, NotFound};
 use std::io::{Cursor, Read};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -196,6 +197,7 @@ impl<'a> Client<'a> {
         //      open connection to server
         //      spawn a new task that sends the output of encrypt_frame_reader to server
         // if not, then send frame on tx channel
+        let barrier = Arc::new(Notify::new());
         if self.tx.is_none() {
             println!("Starting new transfer");
             let (tx, rx) = channel(5);
@@ -209,7 +211,9 @@ impl<'a> Client<'a> {
             let client = self.client.clone();
             let password = self.password.to_string();
             let addr = self.addr.clone();
+            let barrier_clone = barrier.clone();
             let transfer_task = actix_web::rt::spawn(async move {
+                println!("STARTING TRANSFER TASK");
                 let framereader = FrameReader::new(ReceiverStream::new(rx));
                 let (key, salt) = generate_key(&password).expect("couldnt generate keystream");
                 let encrypted_frame_stream = {
@@ -224,6 +228,7 @@ impl<'a> Client<'a> {
                     .join(&frame.fps.to_string().to_path())?
                     .join(frame_len.to_string().as_ref())?;
                 println!("the url: {}", url.to_string());
+                barrier_clone.notify_one();
                 if let Err(e) = async {
                     println!("[*] opening connection");
                     let result = client
@@ -237,9 +242,12 @@ impl<'a> Client<'a> {
                 .await
                 {
                     eprintln!("[ERROR] Spawned task failed: {}", e);
+                    return Err(e);
                 }
+                println!("Transfer task complete");
                 Ok::<(), Box<dyn std::error::Error>>(())
             });
+            barrier.notified().await;
             self.transfer_task = Some(transfer_task);
         } else {
             let result = self
@@ -251,8 +259,9 @@ impl<'a> Client<'a> {
             if result.is_err() {
                 eprintln!(
                     "[ERROR] sending over tx: {}",
-                    result.err().unwrap().to_string()
+                    result.as_ref().err().unwrap().to_string()
                 );
+                return result.map_err(|e| e.into());
             }
         }
 
