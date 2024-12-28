@@ -3185,6 +3185,7 @@ dependencies = [
 [[package]]
 name = "security-cam-common"
 version = "0.1.5"
+source = "git+https://github.com/matthewashton-k/security-cam-common#2b73efd376ced7cdfc74c05a6274d9dfc0325624"
 dependencies = [
  "actix-web",
  "aes-gcm",

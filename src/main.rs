@@ -78,8 +78,6 @@ async fn main() {
                             Err(_) => eprintln!("Transfer task timed out"),
                         }
                     }
-
-                    println!("Cleanup completed");
                 }
             }
         }

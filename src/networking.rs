@@ -73,6 +73,7 @@ impl<'a> Client<'a> {
 
     pub async fn login(&self) -> Result<(), Box<dyn Error>> {
         let mut params = HashMap::new();
+        println!("logging in with {} {}", self.username, self.password);
         params.insert("username", self.username);
         params.insert("password", self.password);
         let resp = self
@@ -83,7 +84,9 @@ impl<'a> Client<'a> {
             .await?;
 
         // later on change the webserver to alter the response code if the login fails
-        if !resp.text().await?.contains("Logout") {
+        let text = resp.text().await?;
+        if !text.contains("Logout") {
+            println!("{}", text);
             return Err("login failed".into());
         }
 
@@ -197,9 +200,7 @@ impl<'a> Client<'a> {
         //      open connection to server
         //      spawn a new task that sends the output of encrypt_frame_reader to server
         // if not, then send frame on tx channel
-        let barrier = Arc::new(Notify::new());
         if self.tx.is_none() {
-            println!("Starting new transfer");
             let (tx, rx) = channel(5);
             self.tx = Some(tx.clone());
             let frame_len = frame.frame_bytes.len();
@@ -211,32 +212,24 @@ impl<'a> Client<'a> {
             let client = self.client.clone();
             let password = self.password.to_string();
             let addr = self.addr.clone();
-            let barrier_clone = barrier.clone();
             let transfer_task = actix_web::rt::spawn(async move {
-                println!("STARTING TRANSFER TASK");
                 let framereader = FrameReader::new(ReceiverStream::new(rx));
                 let (key, salt) = generate_key(&password).expect("couldnt generate keystream");
                 let encrypted_frame_stream = {
                     let stream = encrypt_frame_reader(key, salt, framereader, frame_len);
-                    println!("Stream created");
                     Box::pin(stream)
                 };
-                println!("Stream pinned");
                 let url = addr
                     .join("upload/")?
                     .join(&frame.video_num.to_string().to_path())?
                     .join(&frame.fps.to_string().to_path())?
                     .join(frame_len.to_string().as_ref())?;
-                println!("the url: {}", url.to_string());
-                barrier_clone.notify_one();
                 if let Err(e) = async {
-                    println!("[*] opening connection");
-                    let result = client
+                    client
                         .post(url)
                         .body(Body::wrap_stream(encrypted_frame_stream))
                         .send()
                         .await?;
-                    println!("Result: {}", result.text().await.unwrap());
                     Ok::<(), Box<dyn std::error::Error>>(())
                 }
                 .await
@@ -244,10 +237,8 @@ impl<'a> Client<'a> {
                     eprintln!("[ERROR] Spawned task failed: {}", e);
                     return Err(e);
                 }
-                println!("Transfer task complete");
                 Ok::<(), Box<dyn std::error::Error>>(())
             });
-            barrier.notified().await;
             self.transfer_task = Some(transfer_task);
         } else {
             let result = self

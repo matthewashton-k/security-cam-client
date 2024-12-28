@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 reqwest = { version = "*", features = ["cookies", "stream"] }
 imageproc = "0.25.0"
-security-cam-common = { path = "../security-cam-common" }
+security-cam-common = { git = "https://github.com/matthewashton-k/security-cam-common" }
 v4l = "0.14.0"
 reqwest-websocket = "=0.4.4"
 awc = { version = "3.5.1", features = ["cookies"] }
