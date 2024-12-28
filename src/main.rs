@@ -13,19 +13,24 @@ async fn main() {
     // username, passcode, and address should be read in from the command line and then a new Client can be constructed from them
     set_up_dirs().expect("couldnt create video_frames directory");
     let args = std::env::args().collect::<Vec<_>>();
-    if args.len() != 5 {
-        println!("Usage: client <username> <passcode> <address> <video device>");
+    if args.len() != 6 {
+        println!(
+            "Usage: client <username> <passcode> <address> <video device> <cooldown duration>"
+        );
         return;
     }
 
     let username = &args[1];
     let passcode = &args[2];
     let address = &args[3].trim();
+    let cooldown_duration = &args[5]
+        .parse::<usize>()
+        .expect("cooldown time must be an integer");
     let video_device: &u32 = &args[4].parse().expect("video device must be an integer");
     println!("{address}");
     let mut client = Client::new(address, username, passcode).await;
     client.login().await.expect("failed to login");
-    let mut motion_detector = MotionDetector::new(*video_device);
+    let mut motion_detector = MotionDetector::new(*video_device, *cooldown_duration);
 
     // start detection loop
     motion_detector

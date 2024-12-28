@@ -58,18 +58,18 @@ pub struct MotionDetector {
     pub motion_detection_thread: Option<JoinHandle<()>>,
 
     ///when to stop recording after processing frames
-    buffer_delay: Duration,
+    cooldown_time: usize,
 }
 
 impl MotionDetector {
-    pub fn new(video_device: u32) -> Self {
+    pub fn new(video_device: u32, cooldown: usize) -> Self {
         let (tx, rx) = channel();
         Self {
             tx,
             rx,
             video_device,
             motion_detection_thread: None,
-            buffer_delay: Duration::from_secs(5),
+            cooldown_time: cooldown,
         }
     }
 
@@ -106,6 +106,8 @@ impl MotionDetector {
         let mut framerate_time = Instant::now();
         let mut framerate_counter = 0;
         let mut fps = 25;
+        let cooldown = self.cooldown_time;
+        println!("COOLDOWN: {cooldown}");
         self.motion_detection_thread = Some(thread::spawn(move || {
             println!("started thread");
             // ----------------------------------------------------------------
@@ -154,7 +156,7 @@ impl MotionDetector {
                             let score = movement_score(&thresholded_diff1, &thresholded_diff2);
                             if let Some(time) = last_movement {
                                 let time = time.elapsed().as_secs();
-                                if time < 3 {
+                                if time < (cooldown as u64) {
                                     // if movement is still going on
                                     let filename =
                                         gen_filename(&mut framecounter, &mut videocounter);
