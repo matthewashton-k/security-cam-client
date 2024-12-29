@@ -17,3 +17,6 @@ actix-web = "4.3.1"
 [dependencies.image]
 version = "0.25.5"
 default-features = true
+
+[profile.release]
+debug = true

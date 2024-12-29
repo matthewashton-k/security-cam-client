@@ -9,3 +9,7 @@
 *.bytes
 *.unencrypted
 /video_frames
+*.data
+*.perf
+*.svg
+*.old

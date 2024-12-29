@@ -130,30 +130,7 @@ impl MotionDetector {
                         frame3 = Some(frame);
                         if let (Some(f1), Some(f2), Some(f3)) = (&frame1, &frame2, &frame3) {
                             // Calculate the difference between f2 and f1, and between f3 and f2
-                            let diff1 = pixel_diffs(f2, f1, |(x1, y1, p1), (x2, y2, p2)| {
-                                (p1[0].abs_diff(p2[0])) > 30
-                            });
-
-                            let diff2 = pixel_diffs(f3, f2, |(x1, y1, p1), (x2, y2, p2)| {
-                                (p1[0].abs_diff(p2[0])) > 30
-                            });
-
-                            let diff1 = diffs_to_gray_image(diff1, f3.width(), f3.height());
-                            let diff2 = diffs_to_gray_image(diff2, f3.width(), f3.height());
-                            // Threshold the differences
-                            let thresholded_diff1 = threshold(
-                                &diff1,
-                                THRESHOLD_VALUE as u8,
-                                imageproc::contrast::ThresholdType::Binary,
-                            );
-                            let thresholded_diff2 = threshold(
-                                &diff2,
-                                THRESHOLD_VALUE as u8,
-                                imageproc::contrast::ThresholdType::Binary,
-                            );
-
-                            // Combine the differences with a logical AND
-                            let score = movement_score(&thresholded_diff1, &thresholded_diff2);
+                            let score = count_motion_pixels(f1, f2, f3, THRESHOLD_VALUE as u8);
                             if let Some(time) = last_movement {
                                 let time = time.elapsed().as_secs();
                                 if time < (cooldown as u64) {
@@ -291,4 +268,33 @@ fn movement_score(image1: &GrayImage, image2: &GrayImage) -> u32 {
         }
     }
     return count;
+}
+
+/// optimized movement score calculation:
+pub fn count_motion_pixels<I>(frame1: &I, frame2: &I, frame3: &I, threshold: u8) -> u32
+where
+    I: GenericImage<Pixel = Luma<u8>>,
+{
+    let (width, height) = frame1.dimensions();
+    let mut count = 0;
+
+    for y in 0..height {
+        for x in 0..width {
+            // Calculate first diff (frame2 vs frame1)
+            let p1 = frame1.get_pixel(x, y).to_luma()[0].into();
+            let p2: u8 = frame2.get_pixel(x, y).to_luma()[0].into();
+            let diff1 = if p2.abs_diff(p1) > threshold { 1 } else { 0 };
+
+            // Calculate second diff (frame3 vs frame2)
+            let p3 = frame3.get_pixel(x, y).to_rgb()[0];
+            let diff2 = if p3.abs_diff(p2) > threshold { 1 } else { 0 };
+
+            // Bitwise AND the diffs
+            if (diff1 & diff2) == 1 {
+                count += 1;
+            }
+        }
+    }
+
+    count
 }
