@@ -115,7 +115,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_img_capture() {
-        let mut motion_detector = MotionDetector::new(0);
+        let mut motion_detector = MotionDetector::new(0, 10);
         motion_detector.start_detection().unwrap();
         motion_detector.motion_detection_thread.unwrap().join();
     }

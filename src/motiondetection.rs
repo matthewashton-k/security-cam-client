@@ -259,17 +259,6 @@ fn decode(jpg: &[u8]) -> Result<DynamicImage, Box<dyn Error>> {
     Ok(DynamicImage::from_decoder(decoder)?)
 }
 
-fn movement_score(image1: &GrayImage, image2: &GrayImage) -> u32 {
-    let mut count = 0;
-    for (x, y, pixel) in image1.enumerate_pixels() {
-        let pixel2 = image2.get_pixel(x, y);
-        if (pixel[0] & pixel2[0]) != 0 {
-            count += 1;
-        }
-    }
-    return count;
-}
-
 /// optimized movement score calculation:
 pub fn count_motion_pixels<I>(frame1: &I, frame2: &I, frame3: &I, threshold: u8) -> u32
 where

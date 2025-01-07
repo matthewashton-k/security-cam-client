@@ -31,24 +31,9 @@ pub struct Client<'a> {
     pub tx: Option<Sender<Result<Bytes, std::io::Error>>>,
     pub frame_stream: Option<Pin<Box<ReceiverStream<Result<Bytes, std::io::Error>>>>>,
     pub transfer_task: Option<JoinHandle<Result<(), Box<dyn std::error::Error>>>>,
-    // client_awc: awc::Client,
-    // websocket_connection_awc: Option<Box<dyn Sink<Message, Error = WsProtocolError> + Unpin>>,
-    // websocket_connection: Option<reqwest_websocket::WebSocket>,
 }
 
 impl<'a> Client<'a> {
-    // pub async fn close_ws(&mut self) -> Result<(), Box<dyn Error>> {
-    //     if let Some(ws) = self.websocket_connection.take() {
-    //         ws.close(reqwest_websocket::CloseCode::Normal, None).await?;
-    //     }
-    //     if let Some(mut ws) = self.websocket_connection_awc.take() {
-    //         ws.close().await?;
-    //     }
-    //     self.websocket_connection = None;
-    //     self.websocket_connection_awc = None;
-    //     Ok(())
-    // }
-
     pub async fn new(addr: &'a str, username: &'a str, password: &'a str) -> Client<'a> {
         // doesnt need to be a recoverable error because if it fails then we want our whole program to exit anyways
         let client_with_cookies = reqwest::Client::builder()
@@ -65,9 +50,6 @@ impl<'a> Client<'a> {
             tx: None,
             frame_stream: None,
             transfer_task: None,
-            // client_awc,
-            // websocket_connection_awc: None,
-            // websocket_connection: None,
         }
     }
 
@@ -258,62 +240,6 @@ impl<'a> Client<'a> {
 
         Ok(())
     }
-
-    // #[deprecated]
-    // pub async fn send_frame_ws(&mut self, frame: Frame) -> Result<(), Box<dyn Error>> {
-    //     // need new salt each time
-    //     let (key, salt) = generate_key(self.password).expect("couldnt generate keystream");
-    //     let mut stream = Box::pin(encrypt_stream_frame(
-    //         key,
-    //         salt,
-    //         Cursor::new(frame.frame_bytes),
-    //     ));
-
-    //     // create the decrypted frame
-    //     let mut encrypted_frame: Vec<u8> = Vec::new();
-    //     while let Some(Ok(chunk)) = stream.next().await {
-    //         encrypted_frame.extend(chunk);
-    //     }
-
-    //     println!("got here, abt to check websocket connection private member");
-    //     if self.websocket_connection.is_none() {
-    //         let url = self
-    //             .addr
-    //             .join("new_video_stream/")?
-    //             .join(&frame.video_num.to_string().to_path())?
-    //             .join(&frame.fps.to_string())?;
-    //         let connection = self
-    //             .client
-    //             .get(url)
-    //             .upgrade()
-    //             .send()
-    //             .await?
-    //             .into_websocket()
-    //             .await?;
-    //         self.websocket_connection = Some(connection);
-    //     }
-    //     println!("got here");
-    //     if let Some(ws) = &mut self.websocket_connection {
-    //         println!("sending frame over websocket connection");
-    //         let (mut tx, mut rx) = ws.split();
-    //         security_cam_common::futures::future::join(
-    //             async move {
-    //                 tx.send(reqwest_websocket::Message::Binary(encrypted_frame))
-    //                     .await
-    //                     .expect("shit");
-    //             },
-    //             async move {
-    //                 while let Some(message) = rx.try_next().await.unwrap() {
-    //                     if let reqwest_websocket::Message::Text(text) = message {
-    //                         println!("received: {text}");
-    //                     }
-    //                 }
-    //             },
-    //         )
-    //         .await;
-    //     }
-    //     Ok(())
-    // }
 }
 
 trait ToPathSegment {
