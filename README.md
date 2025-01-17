@@ -20,3 +20,8 @@ as they are created.
 ## Usage
 * After running the server found at https://github.com/matthewashton-k/security-cam-server you can then run the client with ```client <username> <passcode> <server address> <video device>``` where video device should be an integer corresponding with whichever video capture device you want to use. (usually 0)
 * Movement is detected based on a threshold, and then the program will begin streaming frames to the server until 10 seconds after the movement has stopped.
+
+
+## Crates:
+Common (Encryption/Decryption, FrameReader, async streams): https://github.com/matthewashton-k/security-cam-common
+<br> Server (Front end, hosting, REST API): https://github.com/matthewashton-k/security-cam-server 
